@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Race Timing Application</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('path/to/your/background.jpg') no-repeat center center fixed;
+            background-size: cover;
+            z-index: -1;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .athlete {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .athlete img {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        .athlete h2 {
+            display: inline-block;
+            vertical-align: middle;
+            margin: 0;
+        }
+        .athlete button {
+            margin-left: 10px;
+            padding: 5px 10px;
+            background-color: #007BFF;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .athlete button:disabled {
+            background-color: #ccc;
+        }
+        .total-time, .lap-time {
+            font-size: 16px;
+            margin-top: 5px;
+        }
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        .results-table th, .results-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        .results-table th {
+            background-color: #007BFF;
+            color: white;
+        }
+        .results-table img {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="background"></div>
+    <div class="container">
+        <h1>Race Timing Application</h1>
+
+        <div class="add-athlete">
+            <input type="file" id="profilePictureInput" accept="image/*">
+            <input type="text" id="athleteNameInput" placeholder="Enter athlete's name">
+            <button onclick="addAthlete()">Add Athlete</button>
+            <button onclick="captureProfilePicture()">Capture Profile Picture</button>
+        </div>
+
+        <button id="masterStartButton" onclick="masterStart()">Master Start</button>
+
+        <div id="athletesContainer"></div>
+
+        <button id="liveResultsButton" onclick="openLiveResults()">Live Results</button>
+        <button id="exportButton" onclick="exportResults()">Export Results</button>
+    </div>
+
+    <script>
+        let athleteIdCounter = 1;
+        let athletes = {};
+        let masterStartTime = null;
+        let liveResultsWindow = null;
+
+        function addAthlete() {
+            const name = document.getElementById('athleteNameInput').value.trim();
+            const profilePictureInput = document.getElementById('profilePictureInput');
+            if (name) {
+                const athleteId = athleteIdCounter++;
+                athletes[athleteId] = {
+                    name,
+                    startTime: null,
+                    lapStartTime: null,
+                    laps: [],
+                    totalTime: null,
+                    profilePicture: profilePictureInput.files[0] ? URL.createObjectURL(profilePictureInput.files[0]) : 'path/to/default/image.jpg'
+                };
+
+                const athleteDiv = document.createElement('div');
+                athleteDiv.className = 'athlete';
+                athleteDiv.id = `athlete${athleteId}`;
+                athleteDiv.innerHTML = `
+                    <img src="${athletes[athleteId].profilePicture}" alt="${name}">
+                    <h2>${name}</h2>
+                    <button onclick="startTimer(${athleteId})" ${masterStartTime ? 'disabled' : ''}>Start</button>
+                    <button onclick="recordLap(${athleteId})">Lap</button>
+                    <button onclick="stopTimer(${athleteId})">Stop</button>
+                    <div id="totalTime${athleteId}" class="total-time">Total Time: 00:00:00.000</div>
+                    <div id="lapTime${athleteId}" class="lap-time">Lap Time: 00:00:00.000</div>
+                    <div class="laps" id="laps${athleteId}"></div>
+                `;
+                document.getElementById('athletesContainer').appendChild(athleteDiv);
+
+                document.getElementById('athleteNameInput').value = '';
+                profilePictureInput.value = '';
+            }
+        }
+
+        function captureProfilePicture() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.capture = 'camera';
+            input.onchange = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const url = reader.result;
+                        const athleteId = athleteIdCounter - 1; // Assuming last added athlete
+                        const athleteDiv = document.getElementById(`athlete${athleteId}`);
+                        athleteDiv.querySelector('img').src = url;
+                        athletes[athleteId].profilePicture = url;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            input.click();
+        }
+
+        function masterStart() {
+            masterStartTime = Date.now();
+            for (const athleteId in athletes) {
+                athletes[athleteId].startTime = masterStartTime;
+                athletes[athleteId].lapStartTime = masterStartTime;
+                athletes[athleteId].intervalId = setInterval(() => updateTimers(athleteId), 10);
+                document.getElementById(`athlete${athleteId}`).querySelector('button').disabled = true;
+            }
+        }
+
+        function startTimer(athleteId) {
+            if (!athletes[athleteId].startTime && !masterStartTime) {
+                athletes[athleteId].startTime = Date.now();
+                athletes[athleteId].lapStartTime = athletes[athleteId].startTime;
+                athletes[athleteId].intervalId = setInterval(() => updateTimers(athleteId), 10);
+            }
+        }
+
+        function recordLap(athleteId) {
+            if (athletes[athleteId].startTime) {
+                const currentLapTime = Date.now() - athletes[athleteId].lapStartTime;
+                athletes[athleteId].laps.push(currentLapTime);
+                athletes[athleteId].lapStartTime = Date.now(); // Set new lap start time
+                updateLapTimes(athleteId);
+                athletes[athleteId].totalTime = athletes[athleteId].laps.reduce((total, lap) => total + lap, 0);
+                updateLiveResults();
+            }
+        }
+
+        function stopTimer(athleteId) {
+            clearInterval(athletes[athleteId].intervalId);
+            const finalLapTime = Date.now() - athletes[athleteId].lapStartTime;
+            athletes[athleteId].laps.push(finalLapTime);
+            athletes[athleteId].totalTime = Date.now() - athletes[athleteId].startTime; // Set finish time as total time
+            updateLapTimes(athleteId);
+            updateLiveResults();
+        }
+
+        function updateTimers(athleteId) {
+            const totalElapsedTime = Date.now() - athletes[athleteId].startTime;
+            const lapElapsedTime = Date.now() - athletes[athleteId].lapStartTime;
+            document.getElementById(`totalTime${athleteId}`).textContent = `Total Time: ${formatTime(totalElapsedTime)}`;
+            document.getElementById(`lapTime${athleteId}`).textContent = `Lap Time: ${formatTime(lapElapsedTime)}`;
+        }
+
+        function updateLapTimes(athleteId) {
+            const lapsDiv = document.getElementById(`laps${athleteId}`);
+            lapsDiv.innerHTML = athletes[athleteId].laps.map((lapTime, index) => `<div>Lap ${index + 1}: ${formatTime(lapTime)}</div>`).join('');
+        }
+
+        function formatTime(milliseconds) {
+            const hours = Math.floor(milliseconds / 3600000);
+            const minutes = Math.floor((milliseconds % 3600000) / 60000);
+            const seconds = Math.floor((milliseconds % 60000) / 1000);
+            const ms = milliseconds % 1000;
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+        }
+
+        function exportResults() {
+            let csvContent = "data:text/csv;charset=utf-8,Name,Total Time,Fastest Lap,";
+            const maxLaps = Math.max(...Object.values(athletes).map(a => a.laps.length));
+            for (let i = 1; i <= maxLaps; i++) {
+                csvContent += `Lap ${i},`;
+            }
+            csvContent += "Fastest Lap Rank\n";
+
+            // Calculate fastest lap time rankings
+            const lapTimes = Object.values(athletes).map(a => Math.min(...a.laps));
+            const sortedLapTimes = [...new Set(lapTimes)].sort((a, b) => a - b);
+            const lapTimeRankings = lapTimes.map(time => sortedLapTimes.indexOf(time) + 1);
+
+            for (const athleteId in athletes) {
+                const athlete = athletes[athleteId];
+                const lapTimes = athlete.laps.map(lap => formatTime(lap)).concat(Array(maxLaps - athlete.laps.length).fill('')).join(',');
+                const fastestLap = Math.min(...athlete.laps);
+                const fastestLapRank = lapTimeRankings[lapTimes.indexOf(formatTime(fastestLap))] || 'N/A';
+                csvContent += `${athlete.name},${formatTime(athlete.totalTime)},${formatTime(fastestLap)},${lapTimes},${fastestLapRank}\n`;
+            }
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "race_results.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function openLiveResults() {
+            if (!liveResultsWindow || liveResultsWindow.closed) {
+                liveResultsWindow = window.open("", "Live Results", "width=800,height=600");
+                liveResultsWindow.document.write(`
+                    <html>
+                    <head>
+                        <title>Live Race Results</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; }
+                            .results-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                            .results-table th, .results-table td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+                            .results-table th { background-color: #007BFF; color: white; }
+                            .results-table img { width: 30px; height: 30px; border-radius: 50%; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>Live Race Results</h1>
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Athlete Name</th>
+                                    <th>Profile Picture</th>
+                                    <th>Total Time</th>
+                                    <th>Fastest Lap</th>
+                                    ${Array.from({ length: 5 }).map((_, i) => `<th>Lap ${i + 1}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody id="liveResultsBody">
+                            </tbody>
+                        </table>
+                    </body>
+                    </html>
+                `);
+                liveResultsWindow.document.close();
+            }
+            updateLiveResults();
+        }
+
+        function updateLiveResults() {
+            if (!liveResultsWindow || liveResultsWindow.closed) return;
+
+            const liveResultsBody = liveResultsWindow.document.getElementById("liveResultsBody");
+            liveResultsBody.innerHTML = "";
+
+            const finishTimes = [];
+            for (const athleteId in athletes) {
+                const athlete = athletes[athleteId];
+                if (athlete.totalTime) {
+                    const fastestLap = Math.min(...athlete.laps);
+                    finishTimes.push({
+                        name: athlete.name,
+                        totalTime: athlete.totalTime,
+                        fastestLap,
+                        laps: athlete.laps,
+                        profilePicture: athlete.profilePicture
+                    });
+                }
+            }
+
+            // Sort by total time
+            finishTimes.sort((a, b) => a.totalTime - b.totalTime);
+
+            // Populate the live results table
+            finishTimes.forEach((athlete, index) => {
+                liveResultsBody.innerHTML += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${athlete.name}</td>
+                        <td><img src="${athlete.profilePicture}" alt="${athlete.name}"></td>
+                        <td>${formatTime(athlete.totalTime)}</td>
+                        <td>${formatTime(athlete.fastestLap)}</td>
+                        ${athlete.laps.map(lap => `<td>${formatTime(lap)}</td>`).join('')}
+                    </tr>
+                `;
+            });
+        }
+    </script>
+</body>
+</html>
